@@ -1,0 +1,208 @@
+version: '3.9'
+
+
+networks:
+  demo:
+    driver: bridge
+
+services:
+
+  postgres:
+    image: postgres:16.1
+    container_name: postgres
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_PASSWORD: a123456789
+      POSTGRES_DB: demo
+    volumes:
+      - ./src/Postgres/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
+    networks:
+      - demo
+
+  pgadmin:
+    image: dpage/pgadmin4:8.0
+    container_name: pgadmin
+    restart: always
+    ports:
+      - 5050:80
+    environment:
+      PGADMIN_DEFAULT_PASSWORD: a123456789
+      PGADMIN_DEFAULT_EMAIL: test@test.com
+    volumes:
+      - ./src/Postgres/servers.json:/pgadmin4/servers.json
+    networks:
+      - demo
+    depends_on:
+      - postgres
+
+  mongo:
+    image: mongo:7.0.3
+    container_name: mongo
+    # environment:
+    #   MONGO_INITDB_ROOT_USERNAME: root
+    #   MONGO_INITDB_ROOT_PASSWORD: a123456789
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./src/Mongo/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - demo
+
+  mongo-express:
+    image: mongo-express:1.0.0-20
+    container_name: mongo-express
+    restart: always
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_BASICAUTH_USERNAME: guest
+      ME_CONFIG_BASICAUTH_PASSWORD: guest
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
+    networks:
+      - demo
+    depends_on:
+      - mongo
+
+
+  rabbitmq:
+    image: rabbitmq:3.12.9-management
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - 5672:5672
+      - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - demo
+
+
+#   jaeger:
+#     image: jaegertracing/all-in-one:1.51
+#     container_name: jaeger
+#     restart: always
+#     ports:
+# #      - 6831:6831/udp # jaeger-agent
+#       - 16686:16686 # jaeger-ui
+# #      - 14269:14269 # jaeger-collector
+# #      - 4317:4317 # jaeger-collector - grpc OTLP
+# #      - 4318:4318 # jaeger-collector - http OTLP
+#     environment:
+#       COLLECTOR_OTLP_ENABLED: true
+#     networks:
+#       - demo
+
+  tempo:
+    image: grafana/tempo:2.3.1
+    hostname: tempo
+    container_name: tempo
+    restart: always
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./src/Tempo/tempo.yaml:/etc/tempo.yaml
+    ports:
+      - 3200:3200   # tempo
+      - 4317:4317  # otlp grpc
+#      - 4318:4318  # otlp http
+    networks:
+      - demo
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    environment:
+      TZ: Europe/Lisbon
+      GF_AUTH_ANONYMOUS_ENABLED: true # Allow anonymous access
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin # Set the role for anonymous users to Admin
+      GF_AUTH_BASIC_ENABLED: false # Disable basic auth
+    ports:
+      - 3000:3000
+    volumes:
+      - ./src/Grafana/data-source.yml:/etc/grafana/provisioning/datasources/data-source.yml # Data source configurations
+      - ./src/Grafana/dashboards:/etc/grafana/provisioning/dashboards # Folder containing dashboards
+      - ./src/Grafana/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml # Dashboard configurations
+    networks:
+      - demo
+    depends_on:
+      - tempo
+
+
+  gateway-sms:
+    build:
+      context: ./src/Demo.Gateway.SMS
+      dockerfile: Dockerfile
+    image: technobre/demo-gateway-sms
+    container_name: gateway-sms
+    restart: always
+    environment:
+      MESSAGEBUS__HOSTNAME: rabbitmq
+      MESSAGEBUS__SSL__SERVERNAME: rabbitmq
+      TELEMETRYEXPORTER: http://tempo:4317
+    networks:
+      - demo
+    depends_on:
+      - rabbitmq
+      - tempo
+
+  gateway-email:
+    build:
+      context: ./src/Demo.Gateway.Email
+      dockerfile: Dockerfile
+    image: technobre/demo-gateway-email
+    container_name: gateway-email
+    restart: always
+    environment:
+      MESSAGEBUS__HOSTNAME: rabbitmq
+      MESSAGEBUS__SSL__SERVERNAME: rabbitmq
+      TELEMETRYEXPORTER: http://tempo:4317
+    networks:
+      - demo
+    depends_on:
+      - rabbitmq
+      - tempo
+
+  api-users:
+    build:
+      context: ./src/Demo.Api.Users
+      dockerfile: Dockerfile
+    image: technobre/demo-api-users
+    container_name: api-users
+    restart: always
+    environment:
+      CONNECTIONSTRINGS__DEFAULT: mongodb://mongo:27017/Demo
+      TELEMETRYEXPORTER: http://tempo:4317
+    ports:
+      - "8089:80"
+    networks:
+      - demo
+    depends_on:
+      - mongo
+      - tempo
+
+  api-notifications:
+    build:
+      context: ./src/Demo.Api.Notifications
+      dockerfile: Dockerfile
+    image: technobre/demo-api-notifications
+    container_name: api-notifications
+    restart: always
+    environment:
+      CONNECTIONSTRINGS__DEFAULT: Server=postgres;Port=5432;Database=demo;User Id=postgres;Password=a123456789;
+      MESSAGEBUS__HOSTNAME: rabbitmq
+      MESSAGEBUS__SSL__SERVERNAME: rabbitmq
+      TELEMETRYEXPORTER: http://tempo:4317
+      USERSAPI: http://api-users:80
+    ports:
+      - "8088:80"
+    networks:
+      - demo
+    depends_on:
+      - postgres
+      - rabbitmq
+      - tempo
+      - gateway-sms
+      - gateway-email
+      - api-users

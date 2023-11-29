@@ -1,0 +1,53 @@
+@NotificationsHost = http://localhost:8088/notifications
+@UsersHost = http://localhost:8089/users
+
+GET {{NotificationsHost}}
+
+###
+
+GET {{NotificationsHost}}/63436e8d-4a0e-4f16-a149-8d0b8e463ee2
+
+###
+
+POST {{NotificationsHost}}
+Content-Type: application/json
+
+{
+    "userId": "ab497ca3-4304-47fd-866d-b647f4daaa99",
+    "message": "Hello World!"
+}
+
+###
+###
+
+GET {{UsersHost}}
+
+###
+
+GET {{UsersHost}}/28111954-9422-4822-a40a-c912f9f297dd
+
+###
+
+POST {{UsersHost}}
+Content-Type: application/json
+
+{
+    "name": "Fake User",
+    "email": "fake@fake.fk",
+    "phone": "1234"
+}
+
+###
+
+PUT {{UsersHost}}/28111954-9422-4822-a40a-c912f9f297dd
+Content-Type: application/json
+
+{
+    "name": "Fake User Update",
+    "email": "fake@Update.fk",
+    "phone": "12341112"
+}
+
+###
+
+DELETE {{UsersHost}}/64c76e00-ce3c-4967-8e50-3d5a972a0cc7
